@@ -1,121 +1,148 @@
-# import csv
-import csv
-import re
-import string
-
 import pandas as pd
-import tensorflow as tf
-import tokenizer as tokenizer
-
-from tensorflow import keras
-from keras_preprocessing.text import Tokenizer
-from keras_preprocessing.sequence import pad_sequences
-
+import tensorflow_hub as hub
+import tensorflow_text
 import numpy as np
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from tensorflow import keras
+from tempfile import TemporaryFile
 import random
-import spacy
+from tqdm import tqdm
 
-vocab_size = 10000
-embedding_dim = 128
-max_length = 250
-trunc_type = 'post'
-padding_type = 'post'
-oov_tok = "<OOV>"
-training_size = 16000 #5000=0.88,7500=0.92,8000=0.92
-num_epochs = 10
+RANDOM_SEED = 42
 
-df = pd.read_csv("korrigierte_trainingsdaten_ohne_germeval2018.csv",encoding="utf8",sep=";")
-print(df.shape)
+use = hub.load("https://tfhub.dev/google/universal-sentence-encoder-multilingual-large/3")
 
-text = df["Tweets"].values.tolist()
-newtext = []
+df = pd.read_csv("Daten_ohne_germeval2018.csv", encoding="utf8", sep=";")
 
-for row in text:
-    list = str(row).split(" ")
-    for word in list:
-        if word.startswith("@"):
-            list.remove(word)
-    for word in list:
-        if word.startswith("@"):
-            list.remove(word)
-    for word in list:
-        if word.startswith("@"):
-            list.remove(word)
-    newtext.append(" ".join(list))
+type_one_hot = OneHotEncoder(sparse=False).fit_transform(
+    df.Hatespeech.to_numpy().reshape(-1, 1)
+)
 
+train_reviews, test_reviews, y_train, y_test = \
+    train_test_split(
+        df.Tweets,
+        type_one_hot,
+        test_size=.1,
+        random_state=RANDOM_SEED
+    )
+# ---------Numpy Datei speichern
+# X_train = []
+# for r in tqdm(train_reviews):
+#   emb = use(r)
+#   review_emb = tf.reshape(emb, [-1]).numpy()
+#   X_train.append(review_emb)
+# X_train = np.array(X_train)
+# np.save("X_train_Daten_ohne@_mit_stopwörter_50_50.npy",X_train)
+# X_test = []
+# for r in tqdm(test_reviews):
+#   emb = use(r)
+#   review_emb = tf.reshape(emb, [-1]).numpy()
+#   X_test.append(review_emb)
+# X_test = np.array(X_test)
+# np.save("X_test_Daten_ohne@_mit_stopwörter_50_50.npy",X_test)
+# np.save("Y_train_Daten_ohne@_mit_stopwörter_50_50.npy",y_train)
+# np.save("Y_test_Daten_ohne@_mit_stopwörter_50_50.npy",y_test)
 
-labels = df['Hatespeech'].values.tolist()
+X_train = np.load("X_train_Daten_ohne@_mit_stopwörter_50_50.npy")
+X_test = np.load("X_test_Daten_ohne@_mit_stopwörter_50_50.npy")
+y_train = np.load("Y_train_Daten_ohne@_mit_stopwörter_50_50.npy")
+y_test = np.load("Y_test_Daten_ohne@_mit_stopwörter_50_50.npy")
 
-text = newtext
+print(X_train.shape, y_train.shape)
 
-tokenizer = Tokenizer(vocab_size)
-tokenizer.fit_on_texts(text)
-word_index = tokenizer.word_index
+model = keras.Sequential()
 
-sequences = tokenizer.texts_to_sequences(text)
+model.add(
+    keras.layers.Dense(
+        units=256,
+        input_shape=(X_train.shape[1],),
+        activation='relu'
+    )
+)
+model.add(
+    keras.layers.Dropout(rate=0.5)
+)
 
-padded = pad_sequences(sequences, padding='post',maxlen=250)
+model.add(
+    keras.layers.Dense(
+        units=128,
+        activation='relu'
+    )
+)
+model.add(
+    keras.layers.Dropout(rate=0.5)
+)
 
-training_sentences = text[0:training_size]
-testing_sentences = text[training_size:]
-training_labels = labels[0:training_size]
-testing_labels = labels[training_size:]
+model.add(keras.layers.Dense(2, activation='softmax'))
+model.compile(
+    loss='categorical_crossentropy',
+    optimizer=keras.optimizers.Adam(0.001),
+    metrics=['accuracy']
+)
 
-tokenizer = Tokenizer(num_words=vocab_size, oov_token=oov_tok)
-tokenizer.fit_on_texts(training_sentences)
-
-word_index = tokenizer.word_index
-
-training_sequences = tokenizer.texts_to_sequences(training_sentences)
-training_padded = pad_sequences(training_sequences, maxlen=max_length, padding=padding_type, truncating=trunc_type)
-
-testing_sequences = tokenizer.texts_to_sequences(testing_sentences)
-testing_padded = pad_sequences(testing_sequences, maxlen=max_length, padding=padding_type, truncating=trunc_type)
-
-training_padded = np.array(training_padded)
-training_labels = np.array(training_labels)
-testing_padded = np.array(testing_padded)
-testing_labels = np.array(testing_labels)
-
-model = tf.keras.Sequential([
-    tf.keras.layers.Embedding(vocab_size, embedding_dim, input_length=max_length),
-    tf.keras.layers.GlobalAveragePooling1D(),
-    tf.keras.layers.Flatten(),
-    tf.keras.layers.Dense(128, activation='relu'),
-    tf.keras.layers.Dense(1, activation='sigmoid')
-])
-model.compile(loss='binary_crossentropy', optimizer=keras.optimizers.Adam(learning_rate=0.005), metrics=['accuracy'])
-
-history = model.fit(training_padded, training_labels, epochs=num_epochs,
-                    validation_data=(testing_padded, testing_labels), verbose=2,batch_size=128)
-
+history = model.fit(
+    X_train, y_train,
+    epochs=8,
+    batch_size=32,
+    validation_split=0.1,
+    verbose=1,
+    shuffle=True
+)
 
 df2 = pd.read_csv('germeval2018.training.txt', encoding="utf-8", sep='\t', names=('TEXT', 'TRASH1', 'TRASH2'))
 labelsTRAINING = df2['TRASH1'].values.tolist()
+labelsTRAINING2 = df2['TRASH2'].values.tolist()
 df2.drop('TRASH1', axis=1, inplace=True)
 df2.drop('TRASH2', axis=1, inplace=True)
 
-trainingListe = df2["TEXT"].values.tolist()
+# X_germ = []
+# for r in tqdm(df2["TEXT"].values.tolist()):
+#   emb = use(r)
+#   review_emb = tf.reshape(emb, [-1]).numpy()
+#   X_germ.append(review_emb)
+# np.save("X_germ_2018.npy",X_germ)
 
+X_germ = np.load("X_germ_2018.npy")
 
-sequences = tokenizer.texts_to_sequences(trainingListe)
-padded = pad_sequences(sequences, maxlen=max_length, padding=padding_type, truncating=trunc_type)
 counterHATESPEECHinFILE = 0
+counterHATESPEECHinModel = 0
+counterHATESPEECHinSum = 0
 counterforRESULTS = 0
-for labels in labelsTRAINING:
-    if labels != "OTHER":
+for i in range(len(labelsTRAINING)):
+    if labelsTRAINING[i] != "OTHER" and labelsTRAINING2[i] != "PROFANITY":
         counterHATESPEECHinFILE = counterHATESPEECHinFILE + 1
 
-p = model.predict(padded)
-print(p)
+p = model.predict(X_germ)
 
-for x in range(len(p)):
-    print(str(p[x]) + "----" + str(labelsTRAINING[x]))
-    if p[x] > 0.6 and labelsTRAINING[x] != 'OTHER':
-        counterforRESULTS = counterforRESULTS + 1
-    if p[x] <= 0.6 and labelsTRAINING[x] == 'OTHER':
-        counterforRESULTS = counterforRESULTS + 1
+threshold = 0.1
 
-print(len(labelsTRAINING))
-print(counterforRESULTS)
-print(counterforRESULTS / len(labelsTRAINING))
+for i in range(90):
+    print("-----------" + str(threshold) + "-------------")
+    counterHATESPEECHinModel = 0
+    counterforRESULTS = 0
+    counterHATESPEECHinSum = 0
+    for x in range(len(p)):
+        if p[x][1] > threshold and labelsTRAINING[x] != 'OTHER' and labelsTRAINING2[i] != "PROFANITY":
+            counterHATESPEECHinModel = counterHATESPEECHinModel + 1
+            counterforRESULTS = counterforRESULTS + 1
+        if p[x][1] <= threshold and labelsTRAINING[x] == 'OTHER' or labelsTRAINING2[i] == "PROFANITY":
+            counterforRESULTS = counterforRESULTS + 1
+        if p[x][1] > threshold:
+            counterHATESPEECHinSum = counterHATESPEECHinSum + 1
+
+    precision = counterHATESPEECHinModel / counterHATESPEECHinSum
+    recall = counterHATESPEECHinModel / counterHATESPEECHinFILE
+
+    print("Hatespeech in File: " + str(counterHATESPEECHinFILE))
+    print("Richtige Hatespeech in Model: " + str(counterHATESPEECHinModel))
+    print("Alle Hatespeech in Model: " + str(counterHATESPEECHinSum))
+    print("Hatespeechhit / Recall :" + str(recall))
+    print("Insgesamte Labels: " + str(len(labelsTRAINING)))
+    print("Richtige Labels in Model: " + str(counterforRESULTS))
+    print("Insgesmte Hitrate / Accuracy :" + str(counterforRESULTS / len(labelsTRAINING)))
+    print("Precision: " + str(precision))
+    if precision + recall > 0:
+        print(("F: " + str(2 * ((precision * recall) / (precision + recall)))))
+    threshold = threshold + 0.01
