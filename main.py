@@ -1,3 +1,5 @@
+import csv
+
 import pandas as pd
 import tensorflow_hub as hub
 import tensorflow_text
@@ -10,23 +12,33 @@ from tempfile import TemporaryFile
 import random
 from tqdm import tqdm
 
-RANDOM_SEED = 42
-
 use = hub.load("https://tfhub.dev/google/universal-sentence-encoder-multilingual-large/3")
 
-df = pd.read_csv("Daten_ohne_germeval2018.csv", encoding="utf8", sep=";")
+df3 = pd.read_csv("Testdaten.csv", encoding="utf8", sep=";")
 
-type_one_hot = OneHotEncoder(sparse=False).fit_transform(
-    df.Hatespeech.to_numpy().reshape(-1, 1)
-)
+# X_testdaten = []
+# for r in tqdm(df3["c_text"].values.tolist()):
+#     emb = use(r)
+#     review_emb = tf.reshape(emb, [-1]).numpy()
+#     X_testdaten.append(review_emb)
+# X_testdaten = np.array(X_testdaten)
+# np.save("X_testdaten.npy", X_testdaten)
 
-train_reviews, test_reviews, y_train, y_test = \
-    train_test_split(
-        df.Tweets,
-        type_one_hot,
-        test_size=.1,
-        random_state=RANDOM_SEED
-    )
+RANDOM_SEED = 42
+
+# df = pd.read_csv("Daten_ohne_germeval2018.csv", encoding="utf8", sep=";")
+#
+# type_one_hot = OneHotEncoder(sparse=False).fit_transform(
+#     df.Hatespeech.to_numpy().reshape(-1, 1)
+# )
+#
+# train_reviews, test_reviews, y_train, y_test = \
+#     train_test_split(
+#         df.Tweets,
+#         type_one_hot,
+#         test_size=.1,
+#         random_state=RANDOM_SEED
+#     )
 # ---------Numpy Datei speichern
 # X_train = []
 # for r in tqdm(train_reviews):
@@ -49,8 +61,6 @@ X_train = np.load("X_train_Daten_ohne@_mit_stopwörter_50_50.npy")
 X_test = np.load("X_test_Daten_ohne@_mit_stopwörter_50_50.npy")
 y_train = np.load("Y_train_Daten_ohne@_mit_stopwörter_50_50.npy")
 y_test = np.load("Y_test_Daten_ohne@_mit_stopwörter_50_50.npy")
-
-print(X_train.shape, y_train.shape)
 
 model = keras.Sequential()
 
@@ -91,58 +101,143 @@ history = model.fit(
     shuffle=True
 )
 
-df2 = pd.read_csv('germeval2018.training.txt', encoding="utf-8", sep='\t', names=('TEXT', 'TRASH1', 'TRASH2'))
-labelsTRAINING = df2['TRASH1'].values.tolist()
-labelsTRAINING2 = df2['TRASH2'].values.tolist()
-df2.drop('TRASH1', axis=1, inplace=True)
-df2.drop('TRASH2', axis=1, inplace=True)
+X_testdaten = np.load("X_testdaten.npy")
+X_wordlist = np.load("X_wordlist.npy")
 
-# X_germ = []
-# for r in tqdm(df2["TEXT"].values.tolist()):
+counterHATESPEECHinModel = 0
+
+p = model.predict(X_testdaten)
+
+threshold = 0.45
+predictions = []
+
+for x in range(len(p)):
+    if p[x][1] > threshold:
+        counterHATESPEECHinModel = counterHATESPEECHinModel + 1
+        predictions.append(1)
+    if p[x][1] <= threshold:
+        predictions.append(0)
+    # if threshold > p[x][1] > threshold - 0.2:
+    #     for word in X_wordlist:
+    #         if word in X_testdaten[x]:
+    #             counterHATESPEECHinModel = counterHATESPEECHinModel + 1
+    #             predictions.append(1)
+    #             break
+    #     predictions.append(0)
+
+threshold = threshold + 0.01
+
+df3["hatespeech"] = predictions
+
+df = pd.read_csv("Entwicklungsdatenfertig.csv", encoding="utf8", sep=";")
+
+type_one_hot = OneHotEncoder(sparse=False).fit_transform(
+    df.toxi.to_numpy().reshape(-1, 1)
+)
+
+train_reviews, test_reviews, y_train, y_test = \
+    train_test_split(
+        df.c_text,
+        type_one_hot,
+        test_size=.2,
+        random_state=RANDOM_SEED
+    )
+# # ---------Numpy Datei speichern
+# X_train = []
+# for r in tqdm(train_reviews):
 #   emb = use(r)
 #   review_emb = tf.reshape(emb, [-1]).numpy()
-#   X_germ.append(review_emb)
-# np.save("X_germ_2018.npy",X_germ)
+#   X_train.append(review_emb)
+# X_train = np.array(X_train)
+# np.save("X_train_Entwicklungsdaten_ohne@.npy",X_train)
+# X_test = []
+# for r in tqdm(test_reviews):
+#   emb = use(r)
+#   review_emb = tf.reshape(emb, [-1]).numpy()
+#   X_test.append(review_emb)
+# X_test = np.array(X_test)
+# np.save("X_test_Entwicklungsdaten_ohne@.npy",X_test)
+# np.save("Y_train_Entwicklungsdaten_ohne@.npy",y_train)
+# np.save("Y_test_Entwicklungsdaten_ohne@.npy",y_test)
 
-X_germ = np.load("X_germ_2018.npy")
+X_train = np.load("X_train_Entwicklungsdaten_ohne@.npy")
+X_test = np.load("X_test_Entwicklungsdaten_ohne@.npy")
+y_train = np.load("Y_train_Entwicklungsdaten_ohne@.npy")
+y_test = np.load("Y_test_Entwicklungsdaten_ohne@.npy")
 
-counterHATESPEECHinFILE = 0
-counterHATESPEECHinModel = 0
-counterHATESPEECHinSum = 0
-counterforRESULTS = 0
-for i in range(len(labelsTRAINING)):
-    if labelsTRAINING[i] != "OTHER" and labelsTRAINING2[i] != "PROFANITY":
-        counterHATESPEECHinFILE = counterHATESPEECHinFILE + 1
+print(X_train.shape, y_train.shape)
 
-p = model.predict(X_germ)
+model = keras.Sequential()
 
-threshold = 0.1
+model.add(
+    keras.layers.Dense(
+        units=256,
+        input_shape=(X_train.shape[1],),
+        activation='relu'
+    )
+)
+model.add(
+    keras.layers.Dropout(rate=0.5)
+)
 
-for i in range(90):
-    print("-----------" + str(threshold) + "-------------")
-    counterHATESPEECHinModel = 0
-    counterforRESULTS = 0
-    counterHATESPEECHinSum = 0
-    for x in range(len(p)):
-        if p[x][1] > threshold and labelsTRAINING[x] != 'OTHER' and labelsTRAINING2[i] != "PROFANITY":
-            counterHATESPEECHinModel = counterHATESPEECHinModel + 1
-            counterforRESULTS = counterforRESULTS + 1
-        if p[x][1] <= threshold and labelsTRAINING[x] == 'OTHER' or labelsTRAINING2[i] == "PROFANITY":
-            counterforRESULTS = counterforRESULTS + 1
-        if p[x][1] > threshold:
-            counterHATESPEECHinSum = counterHATESPEECHinSum + 1
+model.add(
+    keras.layers.Dense(
+        units=128,
+        activation='relu'
+    )
+)
+model.add(
+    keras.layers.Dropout(rate=0.5)
+)
 
-    precision = counterHATESPEECHinModel / counterHATESPEECHinSum
-    recall = counterHATESPEECHinModel / counterHATESPEECHinFILE
+model.add(keras.layers.Dense(5, activation='softmax'))
+model.compile(
+    loss='categorical_crossentropy',
+    optimizer=keras.optimizers.Adam(0.001),
+    metrics=['accuracy']
+)
 
-    print("Hatespeech in File: " + str(counterHATESPEECHinFILE))
-    print("Richtige Hatespeech in Model: " + str(counterHATESPEECHinModel))
-    print("Alle Hatespeech in Model: " + str(counterHATESPEECHinSum))
-    print("Hatespeechhit / Recall :" + str(recall))
-    print("Insgesamte Labels: " + str(len(labelsTRAINING)))
-    print("Richtige Labels in Model: " + str(counterforRESULTS))
-    print("Insgesmte Hitrate / Accuracy :" + str(counterforRESULTS / len(labelsTRAINING)))
-    print("Precision: " + str(precision))
-    if precision + recall > 0:
-        print(("F: " + str(2 * ((precision * recall) / (precision + recall)))))
-    threshold = threshold + 0.01
+history = model.fit(
+    X_train, y_train,
+    epochs=8,
+    batch_size=32,
+    validation_split=0.2,
+    verbose=1,
+    shuffle=True
+)
+
+p = model.predict(X_testdaten)
+toxi = []
+
+for x in range(len(p)):
+    toxi.append(np.argmax(p[x])+1)
+
+df3["toxi"] = toxi
+df3.to_csv("Testdaten_mit_Predictions.csv", encoding="utf8", sep=";")
+
+counter1 = 0
+counter2 = 0
+counter3 = 0
+counter4 = 0
+counter5 = 0
+
+for x in range(len(p)):
+    max = np.argmax(p[x])
+
+    if max == 0:
+        counter1 = counter1 + 1
+    if max == 1:
+        counter2 = counter2 + 1
+    if max == 2:
+        counter3 = counter3 + 1
+        print(p[x])
+    if max == 3:
+        counter4 = counter4 + 1
+    if max == 4:
+        counter5 = counter5 + 1
+
+print(str(counter1))
+print(str(counter2))
+print(str(counter3))
+print(str(counter4))
+print(str(counter5))
